@@ -264,7 +264,7 @@ class ApiProxyController extends Controller
     $accessToken = $request->bearerToken();
     $search   = $request->query('search');
     $release  = $request->query('release'); // optional (from frontend route param)
-    Log::info($release);
+   
     $page     = $request->query('page', 1);
     $perPage  = $request->query('per_page', 10);
 
@@ -324,14 +324,14 @@ class ApiProxyController extends Controller
                     'Authorization' => 'Bearer ' . $accessToken,
                 ])->get("{$this->baseUrl}/ddex-delivery-confirmations/{$id}");
 
-Log::info($response);
+
                 if ($response->successful()) {
                     return $response->json();
                 }
 
                 throw new \Exception("API error: " . $response->status(), $response->status());
             });
-Log::info($data);
+
             return response()->json($data);
         } catch (\Exception $e) {
             return response()->json([
