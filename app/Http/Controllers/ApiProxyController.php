@@ -15,9 +15,9 @@ class ApiProxyController extends Controller
 
     public function __construct()
     {
-        $this->baseUrl = env('MUSIC_API_URL');     // directly from .env
-        $this->apiKey  = env('MUSIC_API_KEY');     // directly from .env
-        $this->referer = env('MUSIC_API_REFERER'); // directly from .env
+        $this->baseUrl = env('MUSIC_API_URL');
+        $this->apiKey  = env('MUSIC_API_KEY');
+        $this->referer = env('MUSIC_API_REFERER');
     }
 
     public function login(Request $request)
@@ -45,87 +45,339 @@ class ApiProxyController extends Controller
     public function releases(Request $request)
     {
         $accessToken = $request->bearerToken();
-        $response = Http::withHeaders([
-            'x-api-key'     => $this->apiKey,
-            'Referer'       => $this->referer,
-            'Authorization' => 'Bearer ' . $accessToken,
+        $search   = $request->query('search');
+        $page     = $request->query('page', 1);
+        $perPage  = $request->query('per_page', 10);
 
-        ])->get("{$this->baseUrl}/releases", [
-            'search'   => $request->query('search'),
-            'page'     => $request->query('page'),
-            'page_size' => $request->query('per_page'),
-        ]);
-        return $response->json();
+        $cacheKey = "releases:search:{$search}:page:{$page}:per:{$perPage}";
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/releases", [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ]);
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch releases',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
     }
 
-    public function artisits(Request $request)
-    {
-        $accessToken = $request->bearerToken(); 
-        $response = Http::withHeaders([
-            'x-api-key'     => $this->apiKey,
-            'Referer'       => $this->referer,
-            'Authorization' => 'Bearer ' . $accessToken,
-
-        ])->get("{$this->baseUrl}/artists", [
-            'search'   => $request->query('search'),
-            'page'     => $request->query('page'),
-            'page_size' => $request->query('per_page'),
-        ]);
-        return $response->json();
-    }
-
-      public function view_release(Request $request, $id)
+    public function artists(Request $request)
     {
         $accessToken = $request->bearerToken();
-        $response = Http::withHeaders([
-            'x-api-key'     => $this->apiKey,
-            'Referer'       => $this->referer,
-            'Authorization' => 'Bearer ' . $accessToken,
-        ])->get("{$this->baseUrl}/releases/{$id}");
-        return $response->json();
+        $search   = $request->query('search');
+        $page     = $request->query('page', 1);
+        $perPage  = $request->query('per_page', 10);
+
+        $cacheKey = "artists:search:{$search}:page:{$page}:per:{$perPage}";
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/artists", [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ]);
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch artists',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
+    }
+
+    public function view_release(Request $request, $id)
+    {
+        $accessToken = $request->bearerToken();
+        $cacheKey = "release:{$id}";
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($accessToken, $id) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/releases/{$id}");
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch release',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
     }
 
     public function view_artist(Request $request, $id)
     {
         $accessToken = $request->bearerToken();
-        $response = Http::withHeaders([
-            'x-api-key'     => $this->apiKey,
-            'Referer'       => $this->referer,
-            'Authorization' => 'Bearer ' . $accessToken,
-        ])->get("{$this->baseUrl}/artists/{$id}");
+        $cacheKey = "artist:{$id}";
 
-        if ($response->status() === 401) {
-            return response()->json(['error' => 'Unauthorized'], 401);
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($accessToken, $id) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/artists/{$id}");
+
+                if (!$response->successful()) {
+                    throw new \Exception("API error: " . $response->status(), $response->status());
+                }
+
+                $artistData = $response->json();
+                $tracks = [];
+
+                if (!empty($artistData['spotify_identifier'])) {
+                    $spotify_id   = $artistData['spotify_identifier'];
+                    $spotifyToken = $this->getSpotifyToken();
+
+                    $tracksResponse = Http::withToken($spotifyToken)
+                        ->get("https://api.spotify.com/v1/artists/{$spotify_id}/top-tracks", [
+                            'market' => 'US',
+                        ]);
+
+                    $tracks = $tracksResponse->json('tracks') ?? [];
+                }
+
+                return [
+                    'artist' => $artistData,
+                    'tracks' => $tracks,
+                ];
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch artist',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
         }
-        $artistData = $response->json();
-        $tracks = [];
-        if (!empty($artistData['spotify_identifier'])) {
-            $spotify_id   = $artistData['spotify_identifier'];
-            $spotifyToken = $this->getSpotifyToken();
-            $tracksResponse = Http::withToken($spotifyToken)
-                ->get("https://api.spotify.com/v1/artists/{$spotify_id}/top-tracks", [
-                    'market' => 'US',
-                ]);
-            $tracks = $tracksResponse->json('tracks') ?? [];
-        }
-        return response()->json([
-            'artist' => $artistData,
-            'tracks' => $tracks,
-        ]);
     }
 
     public function view_track(Request $request, $id)
     {
         $accessToken = $request->bearerToken();
+        $cacheKey = "track:{$id}";
 
-        $response = Http::withHeaders([
-            'x-api-key'     => $this->apiKey,
-            'Referer'       => $this->referer,
-            'Authorization' => 'Bearer ' . $accessToken,
-        ])->get("{$this->baseUrl}/tracks/{$id}");
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($accessToken, $id) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/tracks/{$id}");
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch track',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
+    }
+
+    public function labels(Request $request)
+    {
+        $accessToken = $request->bearerToken();
+        $search   = $request->query('search');
+        $page     = $request->query('page', 1);
+        $perPage  = $request->query('per_page', 10);
+
+        $cacheKey = "labels:search:{$search}:page:{$page}:per:{$perPage}";
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/labels", [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ]);
 
 
-        return $response->json();
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch releases',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
+    }
+
+    public function delivered_list(Request $request)
+{
+    $accessToken = $request->bearerToken();
+    $search   = $request->query('search');
+    $release  = $request->query('release'); // optional (from frontend route param)
+    Log::info($release);
+    $page     = $request->query('page', 1);
+    $perPage  = $request->query('per_page', 10);
+
+    // Combine release name into search if available
+    if (!empty($release) && empty($search)) {
+        $search = $release;
+    }
+
+    $cacheKey = "delivered:search:{$search}:page:{$page}:per:{$perPage}";
+
+    try {
+        $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $queryParams = [
+                'page'      => $page,
+                'page_size' => $perPage,
+            ];
+
+            if (!empty($search)) {
+                $queryParams['search'] = $search;
+            }
+
+            $response = Http::withHeaders([
+                'x-api-key'     => $this->apiKey,
+                'Referer'       => $this->referer,
+                'Authorization' => 'Bearer ' . $accessToken,
+            ])->get("{$this->baseUrl}/ddex-delivery-confirmations", $queryParams);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            throw new \Exception("API error: " . $response->status(), $response->status());
+        });
+
+        return response()->json($data);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error'   => 'Failed to fetch delivered list',
+            'message' => $e->getMessage(),
+        ], $e->getCode() ?: 500);
+    }
+}
+
+
+    public function view_delivered_list(Request $request, $id)
+    {
+        
+        $accessToken = $request->bearerToken();
+        $cacheKey = "delivered:{$id}";
+
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $id) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/ddex-delivery-confirmations/{$id}");
+
+Log::info($response);
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+Log::info($data);
+            return response()->json($data);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch releases',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
+    }
+
+     public function statements(Request $request)
+    {
+        $accessToken = $request->bearerToken();
+        $search   = $request->query('search');
+        $page     = $request->query('page', 1);
+        $perPage  = $request->query('per_page', 10);
+
+        $cacheKey = "statements:search:{$search}:page:{$page}:per:{$perPage}";
+
+        try {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+                $response = Http::withHeaders([
+                    'x-api-key'     => $this->apiKey,
+                    'Referer'       => $this->referer,
+                    'Authorization' => 'Bearer ' . $accessToken,
+                ])->get("{$this->baseUrl}/statements", [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ]);
+
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                throw new \Exception("API error: " . $response->status(), $response->status());
+            });
+
+            return response()->json($data);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'error'   => 'Failed to fetch releases',
+                'message' => $e->getMessage(),
+            ], $e->getCode() ?: 500);
+        }
     }
 
     private function getSpotifyToken()
