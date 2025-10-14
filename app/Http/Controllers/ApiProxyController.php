@@ -44,26 +44,40 @@ class ApiProxyController extends Controller
     public function releases(Request $request)
     {
         $accessToken = $request->bearerToken();
-        $search   = $request->query('search');
-        $page     = $request->query('page', 1);
-        $perPage  = $request->query('per_page', 10);
-        $cacheKey = "releases:search:{$search}:page:{$page}:per:{$perPage}";
+        $search      = $request->query('search');
+        $page        = $request->query('page', 1);
+        $perPage     = $request->query('per_page', 10);
+        $ordering    = $request->query('ordering'); // only column name — no direction
+        $cacheKey    = "releases:search:{$search}:page:{$page}:per:{$perPage}:order:{$ordering}";
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use (
+                $accessToken,
+                $search,
+                $page,
+                $perPage,
+                $ordering
+            ) {
+                $params = [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ];
+
+                if ($ordering) {
+                    $params['ordering'] = $ordering; // send only column name
+                }
+
                 $response = Http::withHeaders([
                     'x-api-key'     => $this->apiKey,
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
-                ])->get("{$this->baseUrl}/releases", [
-                    'search'    => $search,
-                    'page'      => $page,
-                    'page_size' => $perPage,
-                ]);
+                ])->get("{$this->baseUrl}/releases", $params);
 
                 if ($response->successful()) {
                     return $response->json();
                 }
+
                 throw new \Exception("API error: " . $response->status(), $response->status());
             });
 
@@ -76,32 +90,45 @@ class ApiProxyController extends Controller
         }
     }
 
+
     public function artists(Request $request)
     {
         $accessToken = $request->bearerToken();
         $search   = $request->query('search');
         $page     = $request->query('page', 1);
         $perPage  = $request->query('per_page', 10);
+        $ordering = $request->query('ordering');
 
+        // Generate unique cache key
         $cacheKey = "artists:search:{$search}:page:{$page}:per:{$perPage}";
+        if ($ordering) {
+            $cacheKey .= ":order:{$ordering}";
+        }
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage, $ordering) {
+                // Build query parameters
+                $query = [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ];
+
+                if ($ordering) {
+                    $query['ordering'] = $ordering;
+                }
+
                 $response = Http::withHeaders([
                     'x-api-key'     => $this->apiKey,
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
-                ])->get("{$this->baseUrl}/artists", [
-                    'search'    => $search,
-                    'page'      => $page,
-                    'page_size' => $perPage,
-                ]);
+                ])->get("{$this->baseUrl}/artists", $query);
 
                 if ($response->successful()) {
                     return $response->json();
                 }
 
-                throw new \Exception("API error: " . $response->status(), $response->status());
+                throw new \Exception("API error: " . $response->body(), $response->status());
             });
 
             return response()->json($data);
@@ -112,6 +139,7 @@ class ApiProxyController extends Controller
             ], $e->getCode() ?: 500);
         }
     }
+
 
     public function view_release(Request $request, $id)
     {
@@ -224,21 +252,32 @@ class ApiProxyController extends Controller
         $search   = $request->query('search');
         $page     = $request->query('page', 1);
         $perPage  = $request->query('per_page', 10);
+        $ordering = $request->query('ordering');
 
+        // Build cache key including ordering if present
         $cacheKey = "labels:search:{$search}:page:{$page}:per:{$perPage}";
+        if ($ordering) {
+            $cacheKey .= ":order:{$ordering}";
+        }
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage, $ordering) {
+                // Prepare query params dynamically
+                $query = [
+                    'search'    => $search,
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ];
+
+                if ($ordering) {
+                    $query['ordering'] = $ordering; // ✅ Add ordering if available
+                }
+
                 $response = Http::withHeaders([
                     'x-api-key'     => $this->apiKey,
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
-                ])->get("{$this->baseUrl}/labels", [
-                    'search'    => $search,
-                    'page'      => $page,
-                    'page_size' => $perPage,
-                ]);
-
+                ])->get("{$this->baseUrl}/labels", $query);
 
                 if ($response->successful()) {
                     return $response->json();
@@ -250,30 +289,35 @@ class ApiProxyController extends Controller
             return response()->json($data);
         } catch (\Exception $e) {
             return response()->json([
-                'error'   => 'Failed to fetch releases',
+                'error'   => 'Failed to fetch labels',
                 'message' => $e->getMessage(),
             ], $e->getCode() ?: 500);
         }
     }
+
 
     public function delivered_list(Request $request)
     {
         $accessToken = $request->bearerToken();
         $search   = $request->query('search');
         $release  = $request->query('release'); // optional (from frontend route param)
-
         $page     = $request->query('page', 1);
         $perPage  = $request->query('per_page', 10);
+        $ordering = $request->query('ordering');
 
         // Combine release name into search if available
         if (!empty($release) && empty($search)) {
             $search = $release;
         }
 
+        // Build cache key including ordering if provided
         $cacheKey = "delivered:search:{$search}:page:{$page}:per:{$perPage}";
+        if ($ordering) {
+            $cacheKey .= ":order:{$ordering}";
+        }
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage, $ordering) {
                 $queryParams = [
                     'page'      => $page,
                     'page_size' => $perPage,
@@ -281,6 +325,10 @@ class ApiProxyController extends Controller
 
                 if (!empty($search)) {
                     $queryParams['search'] = $search;
+                }
+
+                if (!empty($ordering)) {
+                    $queryParams['ordering'] = $ordering; // ✅ Add ordering
                 }
 
                 $response = Http::withHeaders([
@@ -304,7 +352,6 @@ class ApiProxyController extends Controller
             ], $e->getCode() ?: 500);
         }
     }
-
 
     public function view_delivered_list(Request $request, $id)
     {
@@ -344,21 +391,34 @@ class ApiProxyController extends Controller
         $search   = $request->query('search');
         $page     = $request->query('page', 1);
         $perPage  = $request->query('per_page', 10);
+        $ordering = $request->query('ordering'); // new: optional ordering param
 
+        // include ordering in cache key only if present
         $cacheKey = "statements:search:{$search}:page:{$page}:per:{$perPage}";
+        if (!empty($ordering)) {
+            $cacheKey .= ":ordering:{$ordering}";
+        }
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage, $ordering) {
+                $queryParams = [
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ];
+
+                if (!empty($search)) {
+                    $queryParams['search'] = $search;
+                }
+
+                if (!empty($ordering)) {
+                    $queryParams['ordering'] = $ordering; // add ordering only if provided
+                }
+
                 $response = Http::withHeaders([
                     'x-api-key'     => $this->apiKey,
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
-                ])->get("{$this->baseUrl}/statements", [
-                    'search'    => $search,
-                    'page'      => $page,
-                    'page_size' => $perPage,
-                ]);
-
+                ])->get("{$this->baseUrl}/statements", $queryParams);
 
                 if ($response->successful()) {
                     return $response->json();
@@ -375,6 +435,7 @@ class ApiProxyController extends Controller
             ], $e->getCode() ?: 500);
         }
     }
+
 
     public function profile(Request $request, $id)
     {
@@ -408,21 +469,34 @@ class ApiProxyController extends Controller
         $search   = $request->query('search');
         $page     = $request->query('page', 1);
         $perPage  = $request->query('per_page', 10);
+        $ordering = $request->query('ordering'); // ✅ optional ordering parameter
 
+        // ✅ Include ordering in cache key only if provided
         $cacheKey = "invoices:search:{$search}:page:{$page}:per:{$perPage}";
+        if (!empty($ordering)) {
+            $cacheKey .= ":ordering:{$ordering}";
+        }
 
         try {
-            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage) {
+            $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $search, $page, $perPage, $ordering) {
+                $queryParams = [
+                    'page'      => $page,
+                    'page_size' => $perPage,
+                ];
+
+                if (!empty($search)) {
+                    $queryParams['search'] = $search;
+                }
+
+                if (!empty($ordering)) {
+                    $queryParams['ordering'] = $ordering; // ✅ only add if exists
+                }
+
                 $response = Http::withHeaders([
                     'x-api-key'     => $this->apiKey,
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
-                ])->get("{$this->baseUrl}/invoices", [
-                    'search'    => $search,
-                    'page'      => $page,
-                    'page_size' => $perPage,
-                ]);
-
+                ])->get("{$this->baseUrl}/invoices", $queryParams);
 
                 if ($response->successful()) {
                     return $response->json();
@@ -434,11 +508,12 @@ class ApiProxyController extends Controller
             return response()->json($data);
         } catch (\Exception $e) {
             return response()->json([
-                'error'   => 'Failed to fetch releases',
+                'error'   => 'Failed to fetch invoices',
                 'message' => $e->getMessage(),
             ], $e->getCode() ?: 500);
         }
     }
+
 
     public function invoice_statements(Request $request)
     {
@@ -529,7 +604,7 @@ class ApiProxyController extends Controller
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
                 ])->get("{$this->baseUrl}/trends", $filters);
-            
+
                 if ($response->successful()) {
                     return $response->json();
                 }
