@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
+
 class ApiProxyController extends Controller
 {
     private string $baseUrl;
@@ -355,10 +356,29 @@ class ApiProxyController extends Controller
 
     public function view_delivered_list(Request $request, $id)
     {
-
         $accessToken = $request->bearerToken();
         $cacheKey = "delivered:{$id}";
 
+        // DSP Mapping
+        $dspDict = [
+            '1'  => ['YouTube Content ID'],
+            '2'  => ['YouTube Premium'],
+            '3'  => ['YouTube Content ID', 'YouTube Premium'],
+            '5'  => ['Beatport'],
+            '6'  => ['Airtel', 'HighResAudio', 'LINE Music', 'Etisalat', 'Tidal', 'Binge', 'Joox', 'Audible Licensing', 'Moodagent', 'MicDrop', '7Digital', 'Exlibris', 'Soundhound', 'iHeartRadio', 'Genie Music', 'MX Player ', 'iMusica', 'Kuack Media', 'Vodafone Play', 'Slacker', 'MePlaylist', 'Yandex Music', 'Audiomack', 'Beatsource', 'Vodafone', 'Nuuday A/S', 'Bugs!', 'TIM Music', 'Digicel', 'Electric Jukebox / Roxi', 'Xiami', "Music in 'Ayoba'", 'Mi TV', 'MyMelo', 'Napster', 'KkBox', 'NEC', 'Pretzel Rocks', 'Jaxsta Music', 'Shareit', 'PlayNetwork', 'Tencent', 'Supernatural', 'AWA', 'Boomplay Music', 'Stellar Entertainment', 'Grandpad', 'TouchTunes', 'QQ Music', 'Gracenote', 'Anghami', 'LICKD', 'Boomerang', 'A1 Xplore Music', 'Fan Label', 'Ncell', 'Soundtrack Your Brand', 'Peloton', 'Simfy Africa', 'Idea', 'NetEase', 'Wynk', 'Lasso', 'United Media Agency', 'Hungama', 'SparkAR', 'Airtel TV', 'Virgin Australia', 'Mixcloud', 'Dub Store Sound Inc.', 'Soundmouse', 'JioSaavn', 'MTNL', 'Nepal Telecom', 'Kakao / MelOn', 'BMAT', 'GrooveFox', 'Qobuz', 'MTN', 'Telenor', 'SoundMachine', 'SunExpress', 'Hardstyle.com', 'Bitel', 'Xite', 'FLO', 'Fizy', 'Shazam', 'NAVER VIBE', 'Global Radio'],
+            '7'  => ['Traxsource'],
+            '8D' => ['Deezer'],
+            '8J' => ['Junodownload'],
+            '8S' => ['Spotify'],
+            '10' => ['Douyin', 'TikTok'],
+            '11' => ['Twitch', 'Audible Magic'],
+            '14' => ['Facebook AL', 'Faacebook FP', 'Instagram'],
+            '15' => ['Amazon Music', 'Amazon Unlimited', 'Amazon Prime'],
+            '16' => ['SoundCloud GO+', 'SoundCloud'],
+            '17' => ['Deezer'],
+            '19' => ['Pandora'],
+            '20' => ['Apple Music', 'iTunes']
+        ];
 
         try {
             $data = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($accessToken, $id) {
@@ -368,13 +388,22 @@ class ApiProxyController extends Controller
                     'Authorization' => 'Bearer ' . $accessToken,
                 ])->get("{$this->baseUrl}/ddex-delivery-confirmations/{$id}");
 
-
                 if ($response->successful()) {
                     return $response->json();
                 }
 
                 throw new \Exception("API error: " . $response->status(), $response->status());
             });
+
+            // ✅ Map store IDs to store names
+            if (isset($data['store_confirmations'])) {
+                $data['store_confirmations'] = array_map(function ($item) use ($dspDict) {
+                    $storeId = $item['store'];
+                    $storeNames = $dspDict[$storeId] ?? ["Unknown Store"];
+                    $item['store_name'] = implode(', ', $storeNames);
+                    return $item;
+                }, $data['store_confirmations']);
+            }
 
             return response()->json($data);
         } catch (\Exception $e) {
@@ -384,6 +413,7 @@ class ApiProxyController extends Controller
             ], $e->getCode() ?: 500);
         }
     }
+
 
     public function statements(Request $request)
     {
@@ -584,7 +614,6 @@ class ApiProxyController extends Controller
         }
     }
 
-
     public function trends(Request $request)
     {
         $accessToken = $request->bearerToken();
@@ -604,17 +633,44 @@ class ApiProxyController extends Controller
                     'Referer'       => $this->referer,
                     'Authorization' => 'Bearer ' . $accessToken,
                 ])->get("{$this->baseUrl}/trends", $filters);
-
-                if ($response->successful()) {
-                    return $response->json();
+                if (!$response->successful()) {
+                    throw new \Exception("API Error: {$response->status()} - " . $response->body(), $response->status());
                 }
-                throw new \Exception(
-                    "API Error: {$response->status()} - " . $response->body(),
-                    $response->status()
-                );
+                $data = $response->json();
+                if (!empty($filters['release'])) {
+                    $tracksCacheKey = 'tracks_by_release:' . md5($filters['release']);
+                    $filteredTracks = Cache::remember($tracksCacheKey, now()->addMinutes(10), function () use ($accessToken, $filters) {
+
+                        $tracksResponse = Http::withHeaders([
+                            'x-api-key'     => $this->apiKey,
+                            'Referer'       => $this->referer,
+                            'Authorization' => 'Bearer ' . $accessToken,
+                        ])->get("{$this->baseUrl}/tracks", [
+                            'release' => $filters['release'],
+                        ]);
+
+                        $json = $tracksResponse->json();
+                        return $json;
+                    });
+
+                    if (!empty($filteredTracks['results'])) {
+                        // Map only id and name for replacement
+                        $mappedTracks = collect($filteredTracks['results'])->map(function ($track) {
+                            return [
+                                'id'   => $track['id'],
+                                'name' => $track['name'],
+                            ];
+                        })->toArray();
+
+                        $data['tracks'] = $mappedTracks;
+                    }
+                }
+                return $data;
             });
             return response()->json($data);
         } catch (\Exception $e) {
+
+
             return response()->json([
                 'error'   => 'Failed to fetch trends',
                 'message' => $e->getMessage(),
